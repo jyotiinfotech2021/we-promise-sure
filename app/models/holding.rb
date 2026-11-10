@@ -421,8 +421,26 @@ class Holding < ApplicationRecord
         Trade::INTERNAL_MOVEMENT_LABELS
       )
 
-      total_cost, total_qty, rate_missing = trades.pick(*self.class.avg_cost_totals_sql(account.currency))
+      # Grouped by day so each day's purchases can be counted in the shares
+      # this holding is in (#split_adjusted).
+      rows = trades.group("entries.date").pluck(Arel.sql("entries.date"), *self.class.avg_cost_totals_sql(account.currency))
+      return nil if rows.any? { |_date, _cost, _qty, rate_missing| rate_missing }
 
-      self.class.avg_cost_from_totals(total_cost, total_qty, rate_missing, currency)
+      total_cost = rows.sum(BigDecimal("0")) { |_date, cost, _qty, _rate_missing| cost }
+      total_qty = rows.sum(BigDecimal("0")) { |trade_date, _cost, qty, _rate_missing| split_adjusted(qty, trade_date) }
+
+      self.class.avg_cost_from_totals(total_cost, total_qty, false, currency)
+    end
+
+    # A day's purchases in the shares this holding is counted in: a buy before
+    # a 2-for-1 ex-date counts double from that date on, so the cost per share
+    # halves while the total cost stays the same, as the holding calculators
+    # have it. A buy on the ex-date is already in the new shares, as in
+    # Security#split_factor_between. The splits are read once per holding.
+    def split_adjusted(qty, trade_date)
+      @splits ||= security.splits.to_a
+      factor = Security::Split.factor_between(@splits, trade_date, date)
+
+      factor == 1 ? qty : Security::Split.scale(qty, factor)
     end
 end
