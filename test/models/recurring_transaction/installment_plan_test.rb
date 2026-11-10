@@ -2,9 +2,14 @@ require "test_helper"
 
 class RecurringTransaction::InstallmentPlanTest < ActiveSupport::TestCase
   setup do
-    travel_to Date.new(2026, 10, 22)
+    # The first instalment falls on "today" so a charge recorded at its
+    # occurrence date is a settled entry, not a scheduled one.
+    travel_to Date.new(2026, 11, 22)
     @user = users(:family_admin)
     @family = @user.family
+    # These tests build their own budgets. The shared fixture's dates follow
+    # the real calendar, which can collide with the fixed dates below.
+    @family.budgets.delete_all
     @category = categories(:one)
     @interest_category = categories(:food_and_drink)
     # A card of its own, so the balance is the plan's business and nothing
